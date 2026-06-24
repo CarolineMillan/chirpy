@@ -1,6 +1,7 @@
 package main
 
 import (
+	"encoding/json"
 	"fmt"
 	"net/http"
 	"strconv"
@@ -46,6 +47,61 @@ func healthzHandler(res http.ResponseWriter, req *http.Request) {
 	res.Write([]byte("OK"))
 }
 
+func validateHandler(res http.ResponseWriter, req *http.Request) {
+
+	// need to decode the request body
+	type parameters struct {
+		Body string `json:"body"`
+	}
+
+	decoder := json.NewDecoder(req.Body)
+	params := parameters{}
+	err := decoder.Decode(&params)
+	if err != nil {
+		respondWithError(res, http.StatusInternalServerError, "Couldn't decode parameters")
+		return
+	}
+
+	if len(params.Body) > 140 {
+		respondWithError(res, 400, "Chirp is too long")
+		return
+
+	}
+
+	// need to encode the response body
+	type returnVals struct {
+		Valid bool `json:"valid"`
+	}
+	respBody := returnVals{
+		Valid: true,
+	}
+
+	respondWithJSON(res, http.StatusOK, respBody)
+
+}
+
+func respondWithError(res http.ResponseWriter, code int, msg string) {
+	type errorResp struct {
+		Error string `json:"error"`
+	}
+
+	err := errorResp{Error: msg}
+
+	respondWithJSON(res, code, err)
+}
+
+func respondWithJSON(res http.ResponseWriter, code int, payload any) {
+	dat, err := json.Marshal(payload)
+	if err != nil {
+		fmt.Printf("Error marshalling JSON: %s", err)
+		respondWithError(res, 500, err.Error())
+		return
+	}
+	res.Header().Add("Content-Type", "application/json")
+	res.WriteHeader(code)
+	res.Write(dat)
+}
+
 func main() {
 
 	// create the handler for the server
@@ -55,6 +111,7 @@ func main() {
 	serve_mux.HandleFunc("GET /api/healthz", healthzHandler)
 	serve_mux.HandleFunc("GET /admin/metrics", cfg.printHitsHandler)
 	serve_mux.HandleFunc("POST /admin/reset", cfg.resetHitsHandler)
+	serve_mux.HandleFunc("POST /api/validate_chirp", validateHandler)
 
 	// create the server
 	server_struct := http.Server{}
