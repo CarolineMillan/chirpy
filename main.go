@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"net/http"
 	"strconv"
+	"strings"
 	"sync/atomic"
 )
 
@@ -65,15 +66,18 @@ func validateHandler(res http.ResponseWriter, req *http.Request) {
 	if len(params.Body) > 140 {
 		respondWithError(res, 400, "Chirp is too long")
 		return
-
 	}
+
+	params.Body = replaceProfanity(params.Body)
 
 	// need to encode the response body
 	type returnVals struct {
-		Valid bool `json:"valid"`
+		//Valid bool `json:"valid"`
+		CleanedBody string `json:"cleaned_body"`
 	}
 	respBody := returnVals{
-		Valid: true,
+		//Valid: true,
+		CleanedBody: params.Body,
 	}
 
 	respondWithJSON(res, http.StatusOK, respBody)
@@ -100,6 +104,28 @@ func respondWithJSON(res http.ResponseWriter, code int, payload any) {
 	res.Header().Add("Content-Type", "application/json")
 	res.WriteHeader(code)
 	res.Write(dat)
+}
+
+func replaceProfanity(str string) string {
+	//lower := strings.ToLower(str)
+	words := strings.Split(str, " ")
+	newWords := make([]string, 0) //len(words))
+	for _, word := range words {
+		if isProfane(word) {
+			newWords = append(newWords, "****")
+		} else {
+			newWords = append(newWords, word)
+		}
+	}
+	return strings.Join(newWords, " ")
+}
+
+func isProfane(str string) bool {
+	lower := strings.ToLower(str)
+	if lower == "kerfuffle" || lower == "sharbert" || lower == "fornax" {
+		return true
+	}
+	return false
 }
 
 func main() {
