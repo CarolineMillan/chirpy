@@ -17,3 +17,6 @@ A HTTP server built from scratch without a framework
 to build and run: ```go build -o out && ./out```
 you'll need to do this every time you change your code
 it rebuilds and restarts the server
+
+
+connection string: "postgres://carolinemillan:@localhost:5432/chirpy"
