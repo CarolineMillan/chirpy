@@ -20,3 +20,8 @@ it rebuilds and restarts the server
 
 
 connection string: "postgres://carolinemillan:@localhost:5432/chirpy"
+
+uses argon2id for hashing passwords
+
+uses JSON Web Tokens (JWTs) for authentication
+

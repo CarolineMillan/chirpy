@@ -5,7 +5,9 @@ import _ "github.com/lib/pq"
 import (
 	"database/sql"
 	"encoding/json"
+	"errors"
 	"fmt"
+	"github.com/CarolineMillan/chirpy/internal/auth"
 	"github.com/CarolineMillan/chirpy/internal/database"
 	"github.com/google/uuid"
 	"github.com/joho/godotenv"
@@ -140,7 +142,7 @@ func (cfg *apiConfig) getChirpsHandler(res http.ResponseWriter, req *http.Reques
 
 	chirps, err := cfg.db.GetAllChirps(req.Context())
 	if err != nil {
-		fmt.Print("Error: couldn't get chirps.")
+		respondWithError(res, http.StatusInternalServerError, "Couldn't get chirps.")
 		return
 	}
 
@@ -158,6 +160,43 @@ func (cfg *apiConfig) getChirpsHandler(res http.ResponseWriter, req *http.Reques
 		}
 
 		respBody = append(respBody, new_chirp)
+	}
+
+	respondWithJSON(res, http.StatusOK, respBody)
+}
+
+func (cfg *apiConfig) getChirpHandler(res http.ResponseWriter, req *http.Request) {
+	// returns one chirp in the database given an ID
+
+	chirpID := req.PathValue("chirpID")
+
+	chirpUUID, err := uuid.Parse(chirpID)
+	if err != nil {
+		respondWithError(res, http.StatusInternalServerError, "Couldn't parse chirp ID.")
+		return
+	}
+
+	chirp, err := cfg.db.GetChirp(req.Context(), chirpUUID)
+	if err != nil {
+
+		if errors.Is(err, sql.ErrNoRows) {
+			respondWithError(res, http.StatusNotFound, "Chirp not found.")
+			return
+		}
+
+		respondWithError(res, http.StatusInternalServerError, "Error getting chirp.")
+		return
+
+	}
+
+	// need to encode the response body into a Chirps struct
+
+	respBody := Chirp{
+		ID:        chirp.ID,
+		CreatedAt: chirp.CreatedAt,
+		UpdatedAt: chirp.UpdatedAt,
+		Body:      chirp.Body,
+		UserID:    chirp.UserID,
 	}
 
 	respondWithJSON(res, http.StatusOK, respBody)
@@ -211,21 +250,35 @@ func (cfg *apiConfig) createUserHandler(res http.ResponseWriter, req *http.Reque
 	// creates a user in the users database
 
 	type parameters struct {
-		Email string `json:"email"`
+		Password string `json:"password"`
+		Email    string `json:"email"`
 	}
 
 	decoder := json.NewDecoder(req.Body)
 	params := parameters{}
 	err := decoder.Decode(&params)
+
 	if err != nil {
 		respondWithError(res, http.StatusInternalServerError, "Couldn't decode parameters")
 		return
 	}
 
-	// check that the user doesn't already exist
-	user, err := cfg.db.CreateUser(req.Context(), params.Email)
+	// hash the password before storing it in the db
+	hashed, err := auth.HashPassword(params.Password)
+
 	if err != nil {
-		fmt.Printf("Error: couldn't create user %s. Possibly already exists.", params.Email)
+		respondWithError(res, http.StatusInternalServerError, "Couldn't hash password.")
+		return
+	}
+
+	userParams := database.CreateUserParams{}
+	userParams.Email = params.Email
+	userParams.HashedPassword = hashed
+
+	// check that the user doesn't already exist
+	user, err := cfg.db.CreateUser(req.Context(), userParams)
+	if err != nil {
+		respondWithError(res, http.StatusInternalServerError, "Couldn't create user. Possibly already exists.")
 		return
 	}
 
@@ -241,6 +294,45 @@ func (cfg *apiConfig) createUserHandler(res http.ResponseWriter, req *http.Reque
 
 }
 
+func (cfg *apiConfig) loginHandler(res http.ResponseWriter, req *http.Request) {
+
+	// decode the request
+	type parameters struct {
+		Password string `json:"password"`
+		Email    string `json:"email"`
+	}
+
+	decoder := json.NewDecoder(req.Body)
+	params := parameters{}
+	err := decoder.Decode(&params)
+
+	if err != nil {
+		respondWithError(res, http.StatusInternalServerError, "Couldn't decode parameters")
+		return
+	}
+
+	// get user from db
+	user, err := cfg.db.GetUser(req.Context(), params.Email)
+
+	// compare passwords to authenticate login
+	match, err := auth.CheckPasswordHash(params.Password, user.HashedPassword)
+
+	if (err != nil) || (match == false) {
+		respondWithError(res, http.StatusUnauthorized, "incorrect email or password")
+		return
+	}
+
+	// need to encode the response body into a Users struct
+	respBody := User{
+		ID:        user.ID,
+		CreatedAt: user.CreatedAt,
+		UpdatedAt: user.UpdatedAt,
+		Email:     user.Email,
+	}
+
+	respondWithJSON(res, http.StatusOK, respBody)
+}
+
 func main() {
 
 	// get the info from the .env file
@@ -250,6 +342,8 @@ func main() {
 	dbQueries := database.New(db)
 
 	platform := os.Getenv("PLATFORM")
+
+	// ENDPOINTS
 
 	// create the handler for the server
 	cfg := apiConfig{}
@@ -262,7 +356,9 @@ func main() {
 	serve_mux.HandleFunc("POST /admin/reset", cfg.resetHitsHandler)
 	serve_mux.HandleFunc("POST /api/chirps", cfg.createChirpHandler)
 	serve_mux.HandleFunc("GET /api/chirps", cfg.getChirpsHandler)
+	serve_mux.HandleFunc("GET /api/chirps/{chirpID}", cfg.getChirpHandler)
 	serve_mux.HandleFunc("POST /api/users", cfg.createUserHandler)
+	serve_mux.HandleFunc("POST /api/login", cfg.loginHandler)
 
 	// create the server
 	server_struct := http.Server{}
